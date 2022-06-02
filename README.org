@@ -1,0 +1,346 @@
+#+SETUPFILE: https://gitlab.com/OlMon/org-themes/-/raw/master/src/comfy_inline/comfy_inline.theme
+#+PROPERTY: header-args :eval never-export :exports both :results verbatim :padline no
+* Intermission 2022-05
+:PROPERTIES:
+:ID:       00c0f68d-352a-4bb3-879d-d8ce63c55121
+:END:
+30.05-01.06
+Topic: [[https://tekton.dev][Tekton]]
+
+This file uses [[https://orgmode.org/][Org Mode]], to produce all the embedded sources into files (called ~tangling~), execute ~org-babel-tangle~.
+
+** What is it?
+Buildings blocks for doing CI/CD in a Kubernetes cluster. It provides some CRDs to model your standard CI/CD process: you have a ~Pipeline~, which is built out of multiple ~Tasks~, where each ~Task~ is just a collection of steps that can be arbitrary shell commands. ~Pipelines~ and ~Tasks~ can be started by using ~Triggers~ to produce ~PipelineRuns~ and ~TaskRuns~ which is a concrete execution of either a ~Pipeline~ or ~Task~.
+
+[[https://tekton.dev/docs/concepts/concept-model/][Concept with nice images]]
+
+** Simple Getting Started
+[[https://tekton.dev/docs/getting-started/tasks/][Getting started with Tekton]]
+*** Apply Tekton resources
+This applies all the CRDs, controllers and other resources Tekton needs to work.
+#+begin_src bash
+kubectl apply --filename https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
+#+end_src
+
+#+RESULTS:
+#+begin_example
+namespace/tekton-pipelines unchanged
+podsecuritypolicy.policy/tekton-pipelines configured
+clusterrole.rbac.authorization.k8s.io/tekton-pipelines-controller-cluster-access unchanged
+clusterrole.rbac.authorization.k8s.io/tekton-pipelines-controller-tenant-access unchanged
+clusterrole.rbac.authorization.k8s.io/tekton-pipelines-webhook-cluster-access unchanged
+role.rbac.authorization.k8s.io/tekton-pipelines-controller unchanged
+role.rbac.authorization.k8s.io/tekton-pipelines-webhook unchanged
+role.rbac.authorization.k8s.io/tekton-pipelines-leader-election unchanged
+role.rbac.authorization.k8s.io/tekton-pipelines-info unchanged
+serviceaccount/tekton-pipelines-controller unchanged
+serviceaccount/tekton-pipelines-webhook unchanged
+clusterrolebinding.rbac.authorization.k8s.io/tekton-pipelines-controller-cluster-access unchanged
+clusterrolebinding.rbac.authorization.k8s.io/tekton-pipelines-controller-tenant-access unchanged
+clusterrolebinding.rbac.authorization.k8s.io/tekton-pipelines-webhook-cluster-access unchanged
+rolebinding.rbac.authorization.k8s.io/tekton-pipelines-controller unchanged
+rolebinding.rbac.authorization.k8s.io/tekton-pipelines-webhook unchanged
+rolebinding.rbac.authorization.k8s.io/tekton-pipelines-controller-leaderelection unchanged
+rolebinding.rbac.authorization.k8s.io/tekton-pipelines-webhook-leaderelection unchanged
+rolebinding.rbac.authorization.k8s.io/tekton-pipelines-info unchanged
+customresourcedefinition.apiextensions.k8s.io/clustertasks.tekton.dev configured
+customresourcedefinition.apiextensions.k8s.io/conditions.tekton.dev unchanged
+customresourcedefinition.apiextensions.k8s.io/pipelines.tekton.dev configured
+customresourcedefinition.apiextensions.k8s.io/pipelineruns.tekton.dev configured
+customresourcedefinition.apiextensions.k8s.io/resolutionrequests.resolution.tekton.dev unchanged
+customresourcedefinition.apiextensions.k8s.io/pipelineresources.tekton.dev unchanged
+customresourcedefinition.apiextensions.k8s.io/runs.tekton.dev configured
+customresourcedefinition.apiextensions.k8s.io/tasks.tekton.dev configured
+customresourcedefinition.apiextensions.k8s.io/taskruns.tekton.dev configured
+secret/webhook-certs unchanged
+validatingwebhookconfiguration.admissionregistration.k8s.io/validation.webhook.pipeline.tekton.dev unchanged
+mutatingwebhookconfiguration.admissionregistration.k8s.io/webhook.pipeline.tekton.dev unchanged
+validatingwebhookconfiguration.admissionregistration.k8s.io/config.webhook.pipeline.tekton.dev unchanged
+clusterrole.rbac.authorization.k8s.io/tekton-aggregate-edit unchanged
+clusterrole.rbac.authorization.k8s.io/tekton-aggregate-view unchanged
+configmap/config-artifact-bucket unchanged
+configmap/config-artifact-pvc unchanged
+configmap/config-defaults unchanged
+configmap/feature-flags unchanged
+configmap/pipelines-info unchanged
+configmap/config-leader-election unchanged
+configmap/config-logging unchanged
+configmap/config-observability unchanged
+configmap/config-registry-cert unchanged
+deployment.apps/tekton-pipelines-controller unchanged
+service/tekton-pipelines-controller unchanged
+horizontalpodautoscaler.autoscaling/tekton-pipelines-webhook unchanged
+deployment.apps/tekton-pipelines-webhook unchanged
+service/tekton-pipelines-webhook unchanged
+#+end_example
+*** Create ~Task~
+We create a ~Task~ with just one step running the ~alpine~ Docker image and just echoing "Hello $recipient".
+#+begin_src yaml :tangle task-hello-world.yaml
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: hello
+spec:
+  params:
+    - name: recipient # we define the expected parameters for this task
+      type: string
+  steps:
+    - name: echo
+      image: alpine
+      script: |
+        #!/bin/sh
+        echo "Hello $(params.recipient)"
+#+end_src
+And apply it to Kubernetes:
+#+begin_src bash
+kubectl apply --filename task-hello-world.yaml
+#+end_src
+
+#+RESULTS:
+: task.tekton.dev/hello created
+
+We have successfully created the ~Task~, but nothing happened, our script has not been run yet, let's fix that.
+*** Create ~TaskRun~ to execute task
+With the ~Task~ created, we need to now create a specific execution of it, a ~TaskRun~.
+#+begin_src yaml :tangle task-run-hello-world.yaml
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: hello-task-run
+spec:
+  taskRef:
+    name: hello # we reference the task we have just created
+  params:
+    - name: recipient
+      value: "Patrick" # and pass in our parameters
+
+#+end_src
+And apply it to Kubernetes:
+#+begin_src bash
+kubectl apply --filename task-run-hello-world.yaml
+#+end_src
+
+#+RESULTS:
+: taskrun.tekton.dev/hello-task-run created
+The ~TaskRun~ has been created and the steps should be executed now, let's check:
+#+begin_src bash
+kubectl get taskrun hello-task-run
+kubectl logs --selector=tekton.dev/taskRun=hello-task-run
+#+end_src
+
+#+RESULTS:
+: NAME             SUCCEEDED   REASON      STARTTIME   COMPLETIONTIME
+: hello-task-run   True        Succeeded   16s         8s
+: Hello Patrick
+
+So far so good. Creating the runs manually is not really feasible for a real world scenario, so let's look into how a GitHub integration would work.
+** GitHub integration
+*** Install Tekton Triggers CRDs
+[[https://github.com/tektoncd/triggers][Tekton Triggers]] is a separate project building upon the base CRDs and providing its own CRDs, to use them we need to install them first:
+#+begin_src bash
+kubectl apply --filename https://storage.googleapis.com/tekton-releases/triggers/latest/release.yaml
+kubectl apply --filename https://storage.googleapis.com/tekton-releases/triggers/latest/interceptors.yaml
+#+end_src
+
+#+RESULTS:
+#+begin_example
+podsecuritypolicy.policy/tekton-triggers created
+clusterrole.rbac.authorization.k8s.io/tekton-triggers-admin created
+clusterrole.rbac.authorization.k8s.io/tekton-triggers-core-interceptors created
+clusterrole.rbac.authorization.k8s.io/tekton-triggers-core-interceptors-secrets created
+clusterrole.rbac.authorization.k8s.io/tekton-triggers-eventlistener-roles created
+clusterrole.rbac.authorization.k8s.io/tekton-triggers-eventlistener-clusterroles created
+role.rbac.authorization.k8s.io/tekton-triggers-admin created
+role.rbac.authorization.k8s.io/tekton-triggers-admin-webhook created
+role.rbac.authorization.k8s.io/tekton-triggers-core-interceptors created
+role.rbac.authorization.k8s.io/tekton-triggers-info created
+serviceaccount/tekton-triggers-controller created
+serviceaccount/tekton-triggers-webhook created
+serviceaccount/tekton-triggers-core-interceptors created
+clusterrolebinding.rbac.authorization.k8s.io/tekton-triggers-controller-admin created
+clusterrolebinding.rbac.authorization.k8s.io/tekton-triggers-webhook-admin created
+clusterrolebinding.rbac.authorization.k8s.io/tekton-triggers-core-interceptors created
+clusterrolebinding.rbac.authorization.k8s.io/tekton-triggers-core-interceptors-secrets created
+rolebinding.rbac.authorization.k8s.io/tekton-triggers-controller-admin created
+rolebinding.rbac.authorization.k8s.io/tekton-triggers-webhook-admin created
+rolebinding.rbac.authorization.k8s.io/tekton-triggers-core-interceptors created
+rolebinding.rbac.authorization.k8s.io/tekton-triggers-info created
+customresourcedefinition.apiextensions.k8s.io/clusterinterceptors.triggers.tekton.dev created
+customresourcedefinition.apiextensions.k8s.io/clustertriggerbindings.triggers.tekton.dev created
+customresourcedefinition.apiextensions.k8s.io/eventlisteners.triggers.tekton.dev created
+customresourcedefinition.apiextensions.k8s.io/triggers.triggers.tekton.dev created
+customresourcedefinition.apiextensions.k8s.io/triggerbindings.triggers.tekton.dev created
+customresourcedefinition.apiextensions.k8s.io/triggertemplates.triggers.tekton.dev created
+secret/triggers-webhook-certs created
+validatingwebhookconfiguration.admissionregistration.k8s.io/validation.webhook.triggers.tekton.dev created
+mutatingwebhookconfiguration.admissionregistration.k8s.io/webhook.triggers.tekton.dev created
+validatingwebhookconfiguration.admissionregistration.k8s.io/config.webhook.triggers.tekton.dev created
+clusterrole.rbac.authorization.k8s.io/tekton-triggers-aggregate-edit created
+clusterrole.rbac.authorization.k8s.io/tekton-triggers-aggregate-view created
+configmap/config-defaults-triggers created
+configmap/feature-flags-triggers created
+configmap/triggers-info created
+configmap/config-logging-triggers created
+configmap/config-observability-triggers created
+service/tekton-triggers-controller created
+deployment.apps/tekton-triggers-controller created
+service/tekton-triggers-webhook created
+deployment.apps/tekton-triggers-webhook created
+deployment.apps/tekton-triggers-core-interceptors created
+service/tekton-triggers-core-interceptors created
+clusterinterceptor.triggers.tekton.dev/cel created
+clusterinterceptor.triggers.tekton.dev/bitbucket created
+clusterinterceptor.triggers.tekton.dev/github created
+clusterinterceptor.triggers.tekton.dev/gitlab created
+secret/tekton-triggers-core-interceptors-certs created
+#+end_example
+
+It also needs the `cluster-admin`, so let's give it that too. Note that we give it to the default service account which you should not do on production systems.
+#+begin_src bash
+kubectl create clusterrolebinding tekton-cluster-admin \
+    --clusterrole cluster-admin \
+    --user system:serviceaccount:default:default
+#+end_src
+
+#+RESULTS:
+: clusterrolebinding.rbac.authorization.k8s.io/tekton-cluster-admin created
+
+*** Create a webhook handler
+This time we want it a bit more dynamic and use some of the parameters from the webhook in the task execution as well. To achieve that, the ~Task~ is no longer enough and we will need a ~TriggerTemplate~. As the name suggests, this serves as a template to create ~Tasks~ (but also other resources) dynamically from incoming events.
+Let's start with the ~TriggerBinding~ (it could also be embedded directly into a ~Trigger~, but can't be reused then):
+#+begin_src yaml :tangle github-eventlistener.yaml
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: github-pr-binding
+spec:
+  params:
+    - name: githubcloneurl
+      value: $(body.repository.clone_url)
+---
+#+end_src
+This acts as a mapping of parameters from the incoming event body into named parameters we can later reference in our ~TriggerTemplate~.
+Let's write the ~TriggerTemplate~:
+#+begin_src yaml :tangle github-eventlistener.yaml
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: github-template
+spec:
+  params:
+    - name: githubcloneurl # Here we reference the parameters defined in our TriggerBinding
+  resourcetemplates: # This defines the template that should be used to create a resource when an event arrives
+    - apiVersion: tekton.dev/v1beta1
+      kind: TaskRun
+      metadata:
+        generateName: github-hello-run-
+      spec:
+        taskRef:
+          name: hello # Referencing our previously created task again
+        params:
+          - name: recipient
+            value: $(tt.params.githubcloneurl) # using `tt` we can reference the parameters of the TriggerTemplate
+---
+#+end_src
+Ok, we're mapping the incoming parameters to our named parameters, we've defined what should happen when a trigger occurs, let's tie it all together using the ~EventListener~:
+#+begin_src yaml :tangle github-eventlistener.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-secret # the github interceptor needs a secret containing the key to verify the payload
+type: Opaque
+stringData:
+  secretToken: "1234567"
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: github-listener
+spec:
+  triggers:
+    - name: github-listener
+      interceptors: # interceptors run after receiving an event but before running the TriggerBinding, they can do some extra filtering and validations
+        - ref:
+            name: "github" # The GitHub interceptor is a provided interceptor that validates the payload signature and can do some filtering like only certain event types
+          params:
+            - name: "secretRef"
+              value:
+                secretName: github-secret # above secret with the key for payload verification
+                secretKey: secretToken
+            - name: "eventTypes" # filtering on event types
+              value: ["pull_request"]
+        - name: "only when PRs are opened"
+          ref:
+            name: "cel" # CEL is an expression language that can be used for additional filtering
+          params:
+            - name: "filter"
+              value: "body.action in ['opened', 'synchronize', 'reopened']"
+      bindings:
+        - ref: github-pr-binding # reference our TriggerBinding
+      template:
+        ref: github-template # and reference our TriggerTemplate
+#+end_src
+Now apply everything:
+#+begin_src bash
+kubectl apply --filename github-eventlistener.yaml
+#+end_src
+
+#+RESULTS:
+: triggerbinding.triggers.tekton.dev/github-pr-binding created
+: triggertemplate.triggers.tekton.dev/github-template created
+: secret/github-secret configured
+: eventlistener.triggers.tekton.dev/github-listener created
+
+The ~EventListener~ is starting up a service to be able to accept webhooks, let's port forward it and send a test event:
+#+begin_src bash
+kubectl port-forward service/el-github-listener 8080
+#+end_src
+#+begin_src bash
+curl -v \
+-H 'X-GitHub-Event: pull_request' \
+-H 'X-Hub-Signature: sha1=ba0cdc263b3492a74b601d240c27efe81c4720cb' \
+-H 'Content-Type: application/json' \
+-d '{"action": "opened", "pull_request":{"head":{"sha": "28911bbb5a3e2ea034daf1f6be0a822d50e31e73"}},"repository":{"clone_url": "https://github.com/tektoncd/triggers.git"}}' \
+http://localhost:8080
+#+end_src
+
+#+RESULTS:
+: {"eventListener":"github-listener","namespace":"default","eventListenerUID":"db0f178c-02cf-4b31-96f9-560ee612f3f4","eventID":"effb8b68-e50b-4b14-96d7-66c3b92c2541"}
+
+And check the results:
+#+begin_src bash
+kubectl get taskrun github-hello-run-46t78
+kubectl logs --selector=tekton.dev/taskRun=github-hello-run-46t78
+#+end_src
+
+#+RESULTS:
+: NAME                     SUCCEEDED   REASON      STARTTIME   COMPLETIONTIME
+: github-hello-run-46t78   True        Succeeded   93s         84s
+: Hello https://github.com/tektoncd/triggers.git
+
+Success! The webhook triggered a run and the parameter got passed through correctly.
+
+
+* ToDos
+** DONE How would this get triggered from GitHub for example?
+A [[https://tekton.dev/docs/triggers/interceptors/#github-interceptors][GitHub Interceptor]] is included with Tekton. A ~ClusterInterceptor~ provides a webhook that can be used to trigger a pipeline from an external system, the GitHub ~Interceptor~ is a specific variant of it that also handles GitHub's signature validation and optionally filtering. See also [[https://tekton.dev/docs/triggers/interceptors/#github-interceptors][docs]].
+** DONE Pub/Sub support
+They reference Pub/Sub in passing in one example, but that's about it. Should probably be possible if running in GKE using [[https://cloud.google.com/eventarc/docs/gke/quickstart-pubsub][Eventarc]].
+** DONE Catalog
+Allows re-use and sharing of tasks and pipelines, similar to GitHub Actions Marketplace. There is a public version called [[https://hub.tekton.dev/][Hub]] but there's only a handful of tasks, mostly unmaintained.
+
+* Pro/Cons
+** Pros
+*** Runs in existing Kubernetes, no extra infrastructure necessary
+*** Pretty generic, no vendor lock-in
+If there's a Kubernetes cluster, you can run your pipelines.
+*** You can build your own system on top Tekton (like [[https://jenkins-x.io/][Jenkins-X]])
+*** Already lots of exciting CRDs on top of Tekton available
+**** [[https://github.com/tektoncd/chains][Tekton Chains]]
+allows you to manage supply chain security by watching executions and creating attestations for them.
+*** Backed and started by Google
+They've also started building projects on top of Tekton like [[https://github.com/google/kf][Kf]] (tool to migrate Cloud Foundry apps to GKE).
+** Cons
+*** Security?
+Would probably need a cluster separate from any production payloads as Tekton's service account needs the ~cluster-admin~ role to function.
+*** A lot of boiler plate
